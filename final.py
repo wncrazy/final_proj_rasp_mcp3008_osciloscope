@@ -1,7 +1,5 @@
 from GUI_interface import *
 from ok_dialog import Ui_Dialog as Form
-# from ok_dialog import warning_Dialog_ch1 as warn_ch1
-# from ok_dialog import warning_Dialog_ch2 as warn_ch2
 
 import sys
 import subprocess
@@ -22,6 +20,8 @@ import time
 import csv
 from datetime import datetime
 
+#Setup of GPIO
+
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
@@ -35,6 +35,7 @@ GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(21, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(26, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
+#Setup some variables for future use
 sample_count = 5000
 channels = '0'
 batch_size = '50'
@@ -47,7 +48,8 @@ stylesheet = """
     }
 """
 
-
+#Worker that continuously communicate with the ADC MCP3008 and run C library\file 
+#handles the translation and when finish indicate the main "app" that data is "ready" 
 class WorkerTread(QtCore.QThread):
     update_output = QtCore.pyqtSignal(list)
 
@@ -56,14 +58,21 @@ class WorkerTread(QtCore.QThread):
 
         while (True):
             self.p = QtCore.QProcess()
+            #start process and transfer the right string -num of chanels num of samples and batch size 
+            #** sample rate frequency set to 0-default get the maximum sample rate
             self.p.start("mcp3008hwspi -c {} -f 0 -n {}  -b {}".format(channels, str(sample_count), batch_size))
             self.p.waitForFinished()
+            #read and decode the stdout
             out = bytes(self.p.readAllStandardOutput())
             out = out.decode('utf-8')
             out_final = []
+            #get the sample rate
             out_final.append(float(out.split()[9]))  # sample rate
+            #set the data as numpy array
             data = np.genfromtxt(StringIO(out), skip_header=1, delimiter=',', names=True)
             try:
+                #convert to numbers between 0 and 1 
+                #signal for callback
                 if channels == '01':
                     out_final.append((1 / 1024) * data['value_ch0'])  # ych1
                     out_final.append(((1 / 1024) * data['value_ch1']))  # ych2
@@ -80,11 +89,12 @@ class WorkerTread(QtCore.QThread):
             except:
                 pass
 
-
+#main app:
 class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     global channels, channels, batch_size, sample_count
 
     def __init__(self):
+        #init the gui and define bottuns and etc.
         super().__init__()
         self.setupUi(self)
         self.init_qt()
@@ -93,13 +103,18 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.offset_func()
         self.volt_div_func()
         self.time_div_func()
-        self.bias = 2.425
+        #some more variables set
+        self.bias1 = 2.508
+        self.bias2 = 2.534
         self.graphicsView.setYRange(self.min_voltage, self.max_voltage)
         self.graphicsView.setXRange(self.ax_min, self.ax_max)
+        #define and start the worker
         self.worker = WorkerTread()
         self.worker.start()
+        #define the callback
         self.worker.update_output.connect(self.update_data1)
 
+        #gain function handle the reading of digital input and set channels gain
     def gain_func(self, channel):
         channelA = [GPIO.input(x) for x in self.channel_A_list]
         channelB = [GPIO.input(x) for x in self.channel_B_list]
@@ -145,6 +160,8 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         elif channelB[4] == 1:
             self.gain_ch2 = 100 / 10
 
+
+    #when worker done the data converted and sent to update the plot
     def update_data1(self, val):
         global sample_count, channels, batch_size
         if self.keep_runnig == True:
@@ -171,7 +188,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.update_plot()
             except:
                 pass
-
+    # function that handle the data logging (csv)
     def datalogging(self):
         if self.datalog == False:
 
@@ -210,7 +227,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     for i in self.xdata2_log:
                         wr.writerow(i)
             self.recording_message.setText("\nReady to record")
-
+    #init all graphics (color and etc)
     def init_qt(self):
         self.color_white = 'color: white;'
         self.background_red = 'background-color: red;'
@@ -266,6 +283,8 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.Screen_shot.setStyleSheet(self.background_red)
         self.Next_frame.setStyleSheet(self.background_red)
 
+
+        #define the offset "scroll wheel" bottun steps
     def offset_func(self):
         self.yOffset1 = (self.ch1_y_offset.value() - self.offset_corection) / 200
         self.xOffset1 = (self.ch1_x_offset.value() - self.offset_corection) / 20000
@@ -273,7 +292,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.xOffset2 = (self.ch2_x_offset.value() - self.offset_corection) / 20000
         if self.flag_csv_read == True:
             self.plot_from_csv()
-
+        #init some variables
     def init_variables(self):
         self.channel_A_list = [22, 23, 24, 25, 18]
         self.channel_B_list = [27, 16, 17, 21, 26]
@@ -296,7 +315,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.data = None
         self.channel_num = '01'
         self.freq_samp = '0'
-        self.vref = 4.85
+        self.vref = 5.021
         self.gain_ch1 = 1
         self.gain_ch2 = 1
         self.gain_ch3 = 1
@@ -318,6 +337,8 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.ych1 = list()
         self.ych2 = list()
         self.ych3 = list()
+
+        #define button actions
 
     def init_button_actions(self):
         self.Screen_shot.clicked.connect(self.screen_shot_func)
@@ -368,12 +389,15 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.graphicsView.plotItem.setLabel('left', text='(Amplitude  ', units='*(V/div))[V]', color='red')
         self.graphicsView.plotItem.setClipToView(True)
 
+        #define the info window
     def info_func(self):
         dialog = QtWidgets.QDialog()
         dialog.ui = Form()
         dialog.ui.setupUi(dialog)
         dialog.exec_()
         dialog.show()
+
+        #screen shot button function execution defining
     def screen_shot_func(self):
         exporter = pg.exporters.ImageExporter(self.graphicsView.scene())
         now = datetime.now()
@@ -387,6 +411,10 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         else:
             self.recording_message.setText("\nFile name or location Error\nReady to record")
         exporter.export("{}".format(self.file_location) + ".jpg")
+
+
+    #FFT button function execution defining
+
     def FFT_func(self):
         if self.graphicsView.centralWidget.ctrl.fftCheck.isChecked()==False:
             self.graphicsView.centralWidget.ctrl.fftCheck.toggle()
@@ -403,6 +431,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.graphicsView.setXRange(self.ax_min, self.ax_max)
             self.time_div_func()
 
+    #pause/run button function execution defining
 
     def live_plot_func(self):
         if self.flag_csv_read != True:
@@ -413,7 +442,8 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         elif self.flag_csv_read == True:
             self.keep_runnig = True
             self.flag_csv_read = False
-
+    #define what to do when press exit in menu
+    #stop the recording save it and then exit
     def exit_func(self):
         self.keep_runnig = False
         time.sleep(2)
@@ -439,6 +469,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         wr.writerow(i)
         app.quit()
 
+    #translate the radio button to change the data read from ADC and plot relevant channel
     def set_channels(self):
         global sample_count, channels, batch_size
         if self.show_ch1.isChecked() and self.show_ch2.isChecked():
@@ -451,6 +482,8 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             channels = '1'
             batch_size = '50'
 
+    #handle/translte the "scrol wheel time div" if fft mode set it to 1
+    #also print the value on "LCD" screen
     def time_div_func(self):
         global sample_count
         if self.graphicsView.centralWidget.ctrl.fftCheck.isChecked()==True:
@@ -482,6 +515,9 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.lcd_time_2.display(self.time_div_val_ch2)
             if self.flag_csv_read == True:
                 self.plot_from_csv()
+    
+    #handle/translte the "scrol wheel"  "volt div"
+    #also print the value on "LCD" screen
 
     def volt_div_func(self):
 
@@ -511,6 +547,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.flag_csv_read == True:
             self.plot_from_csv()
 
+    #define the next frame button(when playing from CSV)
     def next_frame_func(self):
         if self.frame_num + 1 <= self.minimum_len_csv1:
             self.frame_num = self.frame_num + 1
@@ -519,6 +556,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.csv_message.setText(
                 "Ploting from:\n{}\nFrame num:\n{}\nYou reached end of file".format(self.file_loc.split('/')[-1],
                                                                                     self.frame_num))
+    #define the previous frame button(when playing from CSV)
 
     def prev_frame_func(self):
         if self.frame_num >= 1:
@@ -528,7 +566,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.csv_message.setText(
                 "Ploting from:\n{}\nFrame num:\n{}\nYou reached start of file".format(self.file_loc.split('/')[-1],
                                                                                       self.frame_num))
-
+    #define the load from CSV button-open menu to choose file sets the right message
     def load_csv(self):
         file = QtWidgets.QFileDialog.getOpenFileNames(self, "Select file")
         self.file_loc = ''.join(str(x) for x in file[0])
@@ -567,7 +605,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.load_csv()
         if self.flag_csv_read == True:
             self.plot_from_csv()
-
+        #ploting from CSV function get the data from load_csv func
     def plot_from_csv(self):
         if self.flag_csv_read == True:
             if self.frame_num < self.minimum_len_csv1:
@@ -584,50 +622,65 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 self.csv_message.setText("You reached end of file")
 
-
+    #plot the live data that is proccesed in update_data1 
     def update_plot(self):
         global sample_count, channels, batch_size
+        #if not CSV reading keep running and not in pause/freeze screen
         if self.keep_runnig == True:
             if self.freeze_screen == False:
                 self.graphicsView.plotItem.clear()
                 try:
+                    #checks how much channels selected  
                     if (self.show_ch1.isChecked() == True and self.show_ch2.isChecked() == True):
+                        #if data logging is on saves the data
                         if self.datalog == True:
-                            self.ych1_log.append(self.gain_ch1 * (self.ych1[0] - self.bias))
-                            self.ych2_log.append(self.gain_ch2 * (self.ych2[0] - self.bias))
+                            self.ych1_log.append((self.ych1[0] - self.bias1)/self.gain_ch1 )
+                            self.ych2_log.append( (self.ych2[0] - self.bias2)/self.gain_ch2 )
                             self.xdata1_log.append(self.xdata[0][:])
                             self.xdata2_log.append(self.xdata[0] + (
                                     self.xdata[0][1] - self.xdata[0][0]))
-                        self.ych1[0] = ((self.ych1[
-                                             0] - self.bias + self.yOffset1) / self.gain_ch1) / self.volt_div_val_ch1
-                        self.ych2[0] = ((self.ych2[
-                                             0] - self.bias + self.yOffset2) / self.gain_ch2) / self.volt_div_val_ch2
+
+                        #preparing the data for ploting
+
+                        self.ych1[0] =  self.yOffset1+((self.ych1[0] - self.bias1) / (self.gain_ch1 *self.volt_div_val_ch1))
+                        self.ych2[0] = (self.yOffset2 +( 
+                                self.ych2[0] - self.bias2)  /(self.gain_ch2 * self.volt_div_val_ch2))
                         self.xdata1 = (self.xOffset1 + self.xdata[0][:]) / self.time_div_val_ch1
                         self.xdata2 = ((self.xOffset2 + self.xdata[0] + (
                                 self.xdata[0][1] - self.xdata[0][0]))) / self.time_div_val_ch2
+
+                        #ploting the data to screen
+
                         self.graphicsView.plot(self.xdata1, self.ych1[0], pen='g')
                         self.graphicsView.plot(self.xdata2, self.ych2[0], pen='r')
+
+                        #delete the saved data from before
+
                         self.ych1.pop(0)
                         self.ych2.pop(0)
                         self.xdata.pop(0)
+
+                        #same like before but if only CH1 should be plotted
                     elif (self.show_ch1.isChecked() == True):
                         if self.datalog == True:
-                            self.ych1_log.append(self.gain_ch1 * (self.ych1[0] - self.bias))
+                            self.ych1_log.append( (self.ych1[0] - self.bias1)/self.gain_ch1 )
                             self.xdata1_log.append(self.xdata[0][:])
 
-                        self.ych1[0] = (self.gain_ch1 * (
-                                self.ych1[0] + self.yOffset1) - self.bias) / self.volt_div_val_ch1
+                        self.ych1[0] =  self.yOffset1+((self.ych1[0] - self.bias1) / (self.gain_ch1 *self.volt_div_val_ch1))
                         self.xdata1 = (self.xOffset1 + self.xdata[0][:]) / self.time_div_val_ch1
                         self.graphicsView.plot(self.xdata1, self.ych1[0], pen='g')
                         self.ych1.pop(0)
                         self.xdata.pop(0)
+
+                        #same like before but if only CH2 should be plotted
+
                     elif (self.show_ch2.isChecked() == True):
                         if self.datalog == True:
-                            self.ych2_log.append(self.gain_ch2 * (self.ych2[0] - self.bias))
+                            self.ych2_log.append(  (self.ych2[0] - self.bias2)/self.gain_ch2)
                             self.xdata2_log.append(self.xdata[0] + (
                                     self.xdata[0][1] - self.xdata[0][0]))
-                        self.ych2[0] = (self.gain_ch2 * (
-                                self.ych2[0] + self.yOffset2) - self.bias) / self.volt_div_val_ch2
+                        self.ych2[0] = (self.yOffset2+( 
+                                self.ych2[0] - self.bias2)  /(self.gain_ch2 * self.volt_div_val_ch2))
                         self.xdata2 = ((self.xOffset2 + self.xdata[0] + (
                                 self.xdata[0][1] - self.xdata[0][0]))) / self.time_div_val_ch2
                         self.graphicsView.plot(self.xdata2, self.ych2[0], pen='r')
@@ -637,20 +690,7 @@ class MyWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     self.sample_rate_label.setText("Sample rate\nper channel:\n{}".format(self.sample_rate))
                 except:
                     pass
-
-    def get_data(self, arg):
-        popen = subprocess.Popen("mcp3008hwspi -c 2 -f 0 -n 500  -b 10", shell=True, stdout=subprocess.PIPE)
-        output = popen.communicate()[0]
-        data = np.genfromtxt(StringIO(self.output.decode('utf-8')), skip_header=1, delimiter=',', names=True)
-        return data['value_ch2']
-
-    def change_args(self):
-        global sample_count
-        self.args = (
-            "mcp3008hwspi -c {0} -f {1} -n {2}  -b 10".format(self.channel_num, self.freq_samp, sample_count))
-
-
-
+#main prog run the window/application class
 if __name__ == '__main__':
     import sys
 
